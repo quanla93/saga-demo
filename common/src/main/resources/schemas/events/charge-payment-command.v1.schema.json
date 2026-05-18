@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://saga-demo.local/schemas/events/charge-payment-command.v1.schema.json",
+  "title": "ChargePaymentCommand v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["orderId", "customerId", "amount"],
+  "properties": {
+    "orderId": { "type": "string", "format": "uuid" },
+    "customerId": { "type": "string", "format": "uuid" },
+    "amount": { "type": "number", "minimum": 0 }
+  }
+}

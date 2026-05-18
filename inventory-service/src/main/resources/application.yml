@@ -34,6 +34,18 @@ spring:
       properties:
         enable.idempotence: true
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      service: ${spring.application.name}
+
 saga:
   outbox:
     poll-interval-ms: 500

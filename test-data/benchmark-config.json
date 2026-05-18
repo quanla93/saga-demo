@@ -1,0 +1,8 @@
+{
+  "orderServiceUrl": "http://localhost:8081",
+  "inventoryServiceUrl": "http://localhost:8083",
+  "k6Script": "test-data/k6-stress.js",
+  "engines": ["DATABASE", "REDIS"],
+  "settleSeconds": 20,
+  "resultDirectory": "test-data/results"
+}

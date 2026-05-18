@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://saga-demo.local/schemas/events/inventory-released-event.v1.schema.json",
+  "title": "InventoryReleasedEvent v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["orderId", "reservationId"],
+  "properties": {
+    "orderId": { "type": "string", "format": "uuid" },
+    "reservationId": { "type": "string", "format": "uuid" }
+  }
+}

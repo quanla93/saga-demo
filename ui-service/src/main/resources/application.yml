@@ -7,6 +7,18 @@ spring:
   thymeleaf:
     cache: false
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      service: ${spring.application.name}
+
 saga:
   order-service-url: http://localhost:8081
   inventory-service-url: http://localhost:8083

@@ -18,7 +18,7 @@ import http from 'k6/http';
 import { check } from 'k6';
 import { Counter, Rate } from 'k6/metrics';
 
-const ORDER_URL = __ENV.ORDER_URL || 'http://localhost:8081';
+const ORDER_URL = __ENV.ORDER_BASE_URL || __ENV.ORDER_URL || 'http://localhost:8081';
 
 // SKU-006 (mug) has 10k stock — safe to hammer without exhausting inventory.
 // Switch to SKU-005 GPU (10 stock) if you want to test contention/oversell behaviour.
@@ -94,8 +94,9 @@ export function handleSummary(data) {
       `${pull('http_req_duration', 'p(99)').toFixed(0)}\n` +
     '===========================================\n';
 
+  const summaryPath = __ENV.K6_SUMMARY_PATH || 'k6-summary.json';
   return {
     'stdout': report,
-    'k6-summary.json': JSON.stringify(data, null, 2),
+    [summaryPath]: JSON.stringify(data, null, 2),
   };
 }

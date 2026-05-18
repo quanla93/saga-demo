@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://saga-demo.local/schemas/events/refund-payment-command.v1.schema.json",
+  "title": "RefundPaymentCommand v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["orderId", "paymentId"],
+  "properties": {
+    "orderId": { "type": "string", "format": "uuid" },
+    "paymentId": { "type": "string", "format": "uuid" }
+  }
+}

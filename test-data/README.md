@@ -53,6 +53,23 @@ pwsh test-data/load-test.ps1 -N 500 -Each 1    # heavier contention
 k6 run test-data/k6-smoke.js                   # 30s sanity check
 k6 run test-data/k6-stress.js                  # full ramp to 1000 VUs, ~4 min
 k6 run --out json=results.json test-data/k6-stress.js   # capture raw data
+
+# 4. Reproducible REDIS vs DATABASE benchmark report
+pwsh test-data/benchmark.ps1
+pwsh test-data/benchmark.ps1 -Engines REDIS    # run one engine only
+```
+
+## Benchmark runner
+
+`benchmark.ps1` automates the interview-friendly comparison between the two stock engines:
+
+1. Switches `inventory-service` to `DATABASE` or `REDIS`.
+2. Warms Redis cache when running Redis mode.
+3. Runs `k6-stress.js`.
+4. Saves raw k6 output and summary under `test-data/results`.
+5. Writes a markdown report from `benchmark-report-template.md`.
+
+The output is intended to be compared with Prometheus/Grafana during the same run so you can explain latency, throughput, Kafka activity, and service health together.
 ```
 
 ## How to read k6-stress.js results

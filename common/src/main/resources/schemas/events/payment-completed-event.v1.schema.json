@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://saga-demo.local/schemas/events/payment-completed-event.v1.schema.json",
+  "title": "PaymentCompletedEvent v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["orderId", "paymentId", "amount"],
+  "properties": {
+    "orderId": { "type": "string", "format": "uuid" },
+    "paymentId": { "type": "string", "format": "uuid" },
+    "amount": { "type": "number", "minimum": 0 }
+  }
+}
