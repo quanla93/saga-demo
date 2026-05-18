@@ -328,40 +328,57 @@ Defined in `SagaState.java` and enforced by `SagaOrchestrator.java`.
 
 ## Running locally
 
-### Prerequisites
+Two modes — pick whichever fits your workflow.
 
-- JDK 21
-- Maven 3.9+
-- Docker + Docker Compose
+### Option A: Full Docker (zero local toolchain)
 
-### 1. Infra
+Requires only **Docker + Docker Compose**. No JDK, no Maven on the host.
 
 ```bash
-docker compose up -d
+cp .env.example .env             # tweak ports / passwords if you want
+docker compose up -d --build     # builds 4 service images + starts infra
+docker compose logs -f order-service   # tail any one service
 ```
 
-This starts Postgres (with the three schemas pre-created), Kafka, Zookeeper,
-and Kafdrop (Kafka UI at <http://localhost:9000>).
+First build pulls Maven base image and downloads dependencies inside the
+build stage — expect 3-5 minutes on a cold cache. Subsequent rebuilds
+(after editing one service's source) take 30-60 seconds thanks to layered
+pom + dependency caching in `docker/Dockerfile.service`.
 
-### 2. Build all modules
+To bring everything down:
 
 ```bash
-mvn clean install
+docker compose down              # stop, keep Postgres data volume
+docker compose down -v           # stop + wipe Postgres
 ```
 
-### 3. Start the services (each in its own terminal)
+To run **only infra** in Docker and develop services with `mvn spring-boot:run`
+on the host (faster iteration when you're editing one service):
 
 ```bash
+docker compose up -d postgres kafka redis kafdrop
 mvn -pl order-service spring-boot:run
-mvn -pl payment-service spring-boot:run
-mvn -pl inventory-service spring-boot:run
-mvn -pl ui-service spring-boot:run
 ```
 
-Flyway runs on first boot of each service and creates its tables in its
+### Option B: Host JDK + Maven + Docker infra
+
+Requires JDK 21 + Maven 3.9+ + Docker.
+
+```bash
+docker compose up -d postgres kafka redis kafdrop   # infra only
+mvn clean install -DskipTests                       # build all modules
+
+# Each in its own terminal:
+mvn -pl order-service     spring-boot:run
+mvn -pl payment-service   spring-boot:run
+mvn -pl inventory-service spring-boot:run
+mvn -pl ui-service        spring-boot:run
+```
+
+Flyway runs on first boot of each service and creates its tables in the
 dedicated schema.
 
-### 4. Open the dashboard
+### Open the dashboard
 
 <http://localhost:8080>
 
@@ -392,7 +409,26 @@ curl http://localhost:8081/api/orders/<orderId> | jq
 curl http://localhost:8083/api/products | jq
 ```
 
-OpenAPI / Swagger UI for order-service: <http://localhost:8081/swagger-ui.html>
+### Swagger / OpenAPI
+
+Each REST-exposing service serves its own Swagger UI:
+
+| Service | Swagger UI | OpenAPI JSON |
+| --- | --- | --- |
+| order-service | <http://localhost:8081/swagger-ui.html> | `/v3/api-docs` |
+| payment-service | <http://localhost:8082/swagger-ui.html> | `/v3/api-docs` |
+| inventory-service | <http://localhost:8083/swagger-ui.html> | `/v3/api-docs` |
+
+(ui-service is server-rendered HTML and does not expose a REST API.)
+
+### Other UIs
+
+| What | Where |
+| --- | --- |
+| Dashboard (orders + products) | <http://localhost:8080> |
+| Kafdrop (topic browser, DLT inspector) | <http://localhost:9000> |
+| Postgres | `localhost:5432` (user/pass `saga`/`saga`, db `saga`) |
+| Redis | `localhost:6379` |
 
 ### Test data + scenario scripts
 

@@ -1,0 +1,57 @@
+# Shared multi-stage Dockerfile for all 4 Spring Boot services
+# (order, payment, inventory, ui). Pass --build-arg SERVICE=<module-name>
+# from docker-compose to pick which one to build.
+#
+# Multi-stage so the runtime image has only a JRE + the executable jar —
+# no Maven, no source. Each layer is cached: poms first (rarely change),
+# then dependency download, then source + build.
+
+ARG SERVICE
+
+# ---------- Build stage ----------
+FROM maven:3.9-eclipse-temurin-21 AS builder
+ARG SERVICE
+WORKDIR /build
+
+# Copy every module's pom.xml first so the dependency-download layer caches
+# across source-only edits. Maven needs all module poms to be present even
+# if we only build one — the parent pom lists all of them as <modules>.
+COPY pom.xml ./
+COPY common/pom.xml common/pom.xml
+COPY order-service/pom.xml order-service/pom.xml
+COPY payment-service/pom.xml payment-service/pom.xml
+COPY inventory-service/pom.xml inventory-service/pom.xml
+COPY ui-service/pom.xml ui-service/pom.xml
+
+# Best-effort dependency pre-fetch. Allowed to fail (|| true) because
+# go-offline is fussy about some plugins; the next mvn package will still
+# resolve anything missing.
+RUN mvn -B -pl ${SERVICE} -am dependency:go-offline -DskipTests || true
+
+# Copy source for the target service + its only intra-repo dependency (common).
+# Other modules' sources are deliberately omitted so a change to e.g. ui-service
+# does not invalidate this layer for order-service.
+COPY common/src common/src
+COPY ${SERVICE}/src ${SERVICE}/src
+
+RUN mvn -B -pl ${SERVICE} -am package -DskipTests
+
+# ---------- Runtime stage ----------
+FROM eclipse-temurin:21-jre AS runtime
+ARG SERVICE
+WORKDIR /app
+
+# Wildcard works because Spring Boot's repackage produces a single
+# ${artifactId}-${version}.jar (the *.jar.original sibling does not end in .jar).
+COPY --from=builder /build/${SERVICE}/target/${SERVICE}-*.jar /app/app.jar
+
+# Picked up by JVM at startup — override with JAVA_OPTS env in docker-compose
+# for per-environment tuning (heap, GC, profiling agents, ...).
+ENV JAVA_OPTS=""
+
+# Run as non-root for defence in depth. spring is uid 1000.
+RUN useradd --system --uid 1000 spring \
+    && chown -R spring:spring /app
+USER spring
+
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar"]

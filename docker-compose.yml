@@ -1,18 +1,28 @@
+# Full-stack compose: infra (postgres / kafka / redis / kafdrop) + the 4
+# Spring Boot services. All overridable knobs live in .env (see .env.example).
+#
+# Usage:
+#   docker compose up -d                       # everything
+#   docker compose up -d postgres kafka redis kafdrop   # infra only (run apps locally)
+#   docker compose logs -f order-service       # tail one service
+#   docker compose down -v                     # stop + wipe Postgres volume
+
 services:
+  # ===== Infrastructure =====
   postgres:
     image: postgres:16-alpine
     container_name: saga-postgres
     environment:
-      POSTGRES_USER: saga
-      POSTGRES_PASSWORD: saga
-      POSTGRES_DB: saga
+      POSTGRES_USER: ${POSTGRES_USER:-saga}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-saga}
+      POSTGRES_DB: ${POSTGRES_DB:-saga}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U saga -d saga"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-saga} -d ${POSTGRES_DB:-saga}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -30,7 +40,7 @@ services:
     depends_on:
       - zookeeper
     ports:
-      - "9092:9092"
+      - "${KAFKA_PORT:-9092}:9092"
       - "29092:29092"
     environment:
       KAFKA_BROKER_ID: 1
@@ -51,7 +61,7 @@ services:
     image: redis:7-alpine
     container_name: saga-redis
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -64,7 +74,7 @@ services:
     depends_on:
       - kafka
     ports:
-      - "9000:9000"
+      - "${KAFDROP_PORT:-9000}:9000"
     environment:
       KAFKA_BROKERCONNECT: kafka:29092
       JVM_OPTS: "-Xms64M -Xmx128M"
@@ -92,6 +102,98 @@ services:
     volumes:
       - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+  # ===== Application services =====
+  # All four share the same Dockerfile, parameterized by SERVICE build-arg.
+  # Spring picks up SPRING_* / SAGA_* env vars via relaxed binding and
+  # overrides whatever's in application.yml.
+
+  order-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.service
+      args:
+        SERVICE: order-service
+    container_name: saga-order
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka:    { condition: service_healthy }
+    ports:
+      - "${ORDER_PORT:-8081}:8081"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-saga}?currentSchema=order_db
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-saga}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-saga}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SAGA_OUTBOX_POLL_INTERVAL_MS: ${SAGA_OUTBOX_POLL_MS:-500}
+      SAGA_TIMEOUT_SECONDS: ${SAGA_TIMEOUT_SECONDS:-120}
+      JAVA_OPTS: ${JAVA_OPTS:--Xmx512m}
+    restart: unless-stopped
+
+  payment-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.service
+      args:
+        SERVICE: payment-service
+    container_name: saga-payment
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka:    { condition: service_healthy }
+    ports:
+      - "${PAYMENT_PORT:-8082}:8082"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-saga}?currentSchema=payment_db
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-saga}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-saga}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SAGA_PAYMENT_FAIL_ABOVE_AMOUNT: ${PAYMENT_FAIL_ABOVE:-5000}
+      JAVA_OPTS: ${JAVA_OPTS:--Xmx512m}
+    restart: unless-stopped
+
+  inventory-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.service
+      args:
+        SERVICE: inventory-service
+    container_name: saga-inventory
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka:    { condition: service_healthy }
+      redis:    { condition: service_healthy }
+    ports:
+      - "${INVENTORY_PORT:-8083}:8083"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-saga}?currentSchema=inventory_db
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-saga}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-saga}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SAGA_INVENTORY_STOCK_SOURCE: ${STOCK_SOURCE:-REDIS}
+      SAGA_INVENTORY_SALE_WINDOWS: ${SALE_WINDOWS:-}
+      SAGA_OUTBOX_POLL_INTERVAL_MS: ${SAGA_OUTBOX_POLL_MS:-500}
+      JAVA_OPTS: ${JAVA_OPTS:--Xmx512m}
+    restart: unless-stopped
+
+  ui-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.service
+      args:
+        SERVICE: ui-service
+    container_name: saga-ui
+    depends_on:
+      - order-service
+      - inventory-service
+    ports:
+      - "${UI_PORT:-8080}:8080"
+    environment:
+      SAGA_ORDER_SERVICE_URL: http://order-service:8081
+      SAGA_INVENTORY_SERVICE_URL: http://inventory-service:8083
+      JAVA_OPTS: ${JAVA_OPTS:--Xmx256m}
+    restart: unless-stopped
 
 volumes:
   postgres-data:
