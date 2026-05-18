@@ -49,8 +49,10 @@ COPY --from=builder /build/${SERVICE}/target/${SERVICE}-*.jar /app/app.jar
 # for per-environment tuning (heap, GC, profiling agents, ...).
 ENV JAVA_OPTS=""
 
-# Run as non-root for defence in depth. spring is uid 1000.
-RUN useradd --system --uid 1000 spring \
+# Run as non-root for defence in depth. Let useradd pick a system-range UID
+# (< 1000) so we don't collide with the "ubuntu" user the Temurin Noble base
+# image ships at UID 1000.
+RUN useradd --system --shell /bin/false spring \
     && chown -R spring:spring /app
 USER spring
 
