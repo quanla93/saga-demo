@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8" />
+  <title>Order detail</title>
+  <script src="https://unpkg.com/htmx.org@2.0.3"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+    h1, h2 { color: #1f2937; }
+    .panel { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+    .step { font-size: 1.1rem; font-weight: 600; color: #2563eb; }
+    .step.done { color: #047857; }
+    .step.failed { color: #b91c1c; }
+    table { border-collapse: collapse; width: 100%; margin-top: 0.5rem; }
+    th, td { border: 1px solid #e5e7eb; padding: 0.4rem 0.6rem; text-align: left; font-size: 0.9rem; }
+    th { background: #f3f4f6; }
+    a { color: #2563eb; }
+  </style>
+</head>
+<body>
+
+<p><a th:href="@{/}">&larr; All orders</a></p>
+
+<h1>Order <span th:text="${order.orderId}"></span></h1>
+
+<div class="panel"
+     th:hx-get="@{|/orders/${order.orderId}/status|}"
+     hx-trigger="load, every 1s"
+     hx-swap="innerHTML">
+  <div th:replace="~{fragments/order-status :: status}"></div>
+</div>
+
+<h2>Line items</h2>
+<table>
+  <thead><tr><th>Product</th><th>Qty</th><th>Unit price</th></tr></thead>
+  <tbody>
+    <tr th:each="i : ${order.items}">
+      <td th:text="${i.productId}"></td>
+      <td th:text="${i.quantity}"></td>
+      <td th:text="${i.unitPrice}"></td>
+    </tr>
+  </tbody>
+</table>
+
+</body>
+</html>

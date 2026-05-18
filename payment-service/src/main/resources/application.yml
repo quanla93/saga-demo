@@ -1,0 +1,43 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: payment-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/saga?currentSchema=payment_db
+    username: saga
+    password: saga
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate.default_schema: payment_db
+      hibernate.jdbc.time_zone: UTC
+    open-in-view: false
+  flyway:
+    enabled: true
+    default-schema: payment_db
+    schemas: payment_db
+    locations: classpath:db/migration
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: payment-service
+      auto-offset-reset: earliest
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
+
+saga:
+  outbox:
+    poll-interval-ms: 500
+  # Demo behaviour: reject charges where amount exceeds this limit so we can
+  # exercise the compensating path. Set very high to always succeed.
+  payment:
+    fail-above-amount: 5000
+
+logging:
+  level:
+    com.quanla.sagademo: DEBUG

@@ -1,0 +1,16 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: ui-service
+  thymeleaf:
+    cache: false
+
+saga:
+  order-service-url: http://localhost:8081
+  inventory-service-url: http://localhost:8083
+
+logging:
+  level:
+    com.quanla.sagademo: DEBUG

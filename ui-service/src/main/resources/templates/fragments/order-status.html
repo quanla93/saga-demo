@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<div th:fragment="status">
+  <p class="step"
+     th:classappend="${order.isTerminal()} ? (${order.status} == 'CONFIRMED' ? 'done' : 'failed') : ''"
+     th:text="${order.currentStep()}"></p>
+  <p>Order status: <strong th:text="${order.status}"></strong> &middot;
+     Saga state: <code th:text="${order.sagaState}"></code></p>
+  <p>Total: <strong th:text="${order.totalAmount}"></strong></p>
+  <p>Last update: <span th:text="${order.updatedAt}"></span></p>
+</div>
+
+</body>
+</html>
