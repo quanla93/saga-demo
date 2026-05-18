@@ -6,6 +6,16 @@ spring:
     name: ui-service
   thymeleaf:
     cache: false
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      # Random group ID per startup so every restart reads from offset 0 and
+      # rebuilds the full saga trace from history. Trade-off: we re-process
+      # every message every start. Fine for a demo with thousands of orders.
+      group-id: ui-service-trace-${random.uuid}
+      auto-offset-reset: earliest
+      properties:
+        spring.json.trusted.packages: "*"
 
 management:
   endpoints:

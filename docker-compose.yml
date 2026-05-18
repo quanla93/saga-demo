@@ -185,13 +185,15 @@ services:
         SERVICE: ui-service
     container_name: saga-ui
     depends_on:
-      - order-service
-      - inventory-service
+      kafka:             { condition: service_healthy }
+      order-service:     { condition: service_started }
+      inventory-service: { condition: service_started }
     ports:
       - "${UI_PORT:-8080}:8080"
     environment:
       SAGA_ORDER_SERVICE_URL: http://order-service:8081
       SAGA_INVENTORY_SERVICE_URL: http://inventory-service:8083
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       JAVA_OPTS: ${JAVA_OPTS:--Xmx256m}
     restart: unless-stopped
 

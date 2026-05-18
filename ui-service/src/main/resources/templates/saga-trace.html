@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8" />
+  <title>Saga trace — <span th:text="${order.orderId}"></span></title>
+  <script src="https://unpkg.com/htmx.org@2.0.3"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 1100px; margin: 1.5rem auto; padding: 0 1rem; color: #1f2937; }
+    h1 { font-size: 1.3rem; }
+    .header { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+    .header dl { display: grid; grid-template-columns: 130px 1fr; gap: 0.3rem 1rem; margin: 0; font-size: 0.9rem; }
+    .header dt { color: #6b7280; }
+    .header dd { margin: 0; font-family: ui-monospace, monospace; }
+    .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 0.75rem; font-weight: 600; }
+    .pill-CONFIRMED, .pill-COMPLETED { background: #d1fae5; color: #065f46; }
+    .pill-CANCELLED, .pill-FAILED { background: #fee2e2; color: #991b1b; }
+    .pill-PENDING, .pill-STARTED, .pill-INVENTORY_RESERVED { background: #fef3c7; color: #92400e; }
+    .pill-COMPENSATING_RELEASE_INVENTORY { background: #fed7aa; color: #9a3412; }
+
+    table.timeline { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    table.timeline th { background: #f3f4f6; text-align: left; padding: 0.45rem 0.6rem; border-bottom: 2px solid #e5e7eb; }
+    table.timeline td { padding: 0.5rem 0.6rem; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+    table.timeline tr.cat-SUCCESS      td:first-child { border-left: 3px solid #10b981; }
+    table.timeline tr.cat-FAILURE      td:first-child { border-left: 3px solid #ef4444; }
+    table.timeline tr.cat-COMPENSATING td:first-child { border-left: 3px solid #f97316; }
+    table.timeline tr.cat-COMMAND      td:first-child { border-left: 3px solid #3b82f6; }
+    table.timeline tr.cat-EVENT        td:first-child { border-left: 3px solid #6b7280; }
+
+    code, .mono { font-family: ui-monospace, monospace; font-size: 0.8rem; }
+    .payload { color: #4b5563; white-space: pre-wrap; word-break: break-all; max-width: 380px; }
+    a { color: #2563eb; }
+    .empty { padding: 2rem; text-align: center; color: #6b7280; }
+    .legend { font-size: 0.8rem; margin: 0.5rem 0 1rem; color: #6b7280; }
+    .legend span { display: inline-block; margin-right: 1rem; padding-left: 8px; border-left: 3px solid; }
+    .legend .l-cmd   { border-color: #3b82f6; }
+    .legend .l-evt   { border-color: #6b7280; }
+    .legend .l-ok    { border-color: #10b981; }
+    .legend .l-fail  { border-color: #ef4444; }
+    .legend .l-comp  { border-color: #f97316; }
+  </style>
+</head>
+<body>
+
+<p><a th:href="@{/}">&larr; All orders</a>
+   &middot; <a th:href="@{|/orders/${order.orderId}|}">Order detail</a></p>
+
+<h1>Saga trace</h1>
+
+<div class="header">
+  <dl>
+    <dt>Order ID</dt><dd th:text="${order.orderId}"></dd>
+    <dt>Customer</dt><dd th:text="${order.customerId}"></dd>
+    <dt>Total</dt><dd th:text="${order.totalAmount}"></dd>
+    <dt>Order status</dt>
+      <dd><span class="pill" th:classappend="|pill-${order.status}|" th:text="${order.status}"></span></dd>
+    <dt>Saga state</dt>
+      <dd><span class="pill" th:classappend="|pill-${order.sagaState}|" th:text="${order.sagaState}"></span>
+          <span th:if="${order.failureReason}" th:text="|— ${order.failureReason}|" style="color:#991b1b;font-size:0.8rem"></span>
+      </dd>
+  </dl>
+</div>
+
+<p class="legend">
+  <span class="l-cmd">command</span>
+  <span class="l-evt">event</span>
+  <span class="l-ok">success</span>
+  <span class="l-fail">failure</span>
+  <span class="l-comp">compensating</span>
+</p>
+
+<div th:hx-get="@{|/saga/${order.orderId}/timeline|}"
+     hx-trigger="load, every 1s"
+     hx-swap="innerHTML">
+  <div th:replace="~{fragments/saga-trace :: timeline}"></div>
+</div>
+
+</body>
+</html>

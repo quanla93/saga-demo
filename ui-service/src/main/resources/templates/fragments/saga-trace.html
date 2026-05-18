@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<div th:fragment="timeline">
+  <div th:if="${#lists.isEmpty(entries)}" class="empty">
+    Waiting for messages... (this page auto-refreshes every second)
+  </div>
+  <table th:unless="${#lists.isEmpty(entries)}" class="timeline">
+    <thead>
+      <tr>
+        <th>When (UTC)</th>
+        <th>Topic</th>
+        <th>Event</th>
+        <th>Message / Saga ID</th>
+        <th>Payload</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr th:each="e : ${entries}" th:classappend="|cat-${e.category()}|">
+        <td class="mono" th:text="${#temporals.format(e.occurredAt, 'HH:mm:ss.SSS')}"></td>
+        <td class="mono" th:text="${e.topic}"></td>
+        <td><strong th:text="${e.eventType}"></strong></td>
+        <td class="mono" style="font-size:0.7rem;color:#6b7280">
+          <div th:text="|msg ${#strings.substring(e.messageId, 0, 8)}|"></div>
+          <div th:text="|saga ${#strings.substring(e.sagaId, 0, 8)}|"></div>
+        </td>
+        <td class="payload" th:text="${e.payloadPreview}"></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+</body>
+</html>

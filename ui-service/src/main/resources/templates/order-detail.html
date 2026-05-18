@@ -19,7 +19,8 @@
 </head>
 <body>
 
-<p><a th:href="@{/}">&larr; All orders</a></p>
+<p><a th:href="@{/}">&larr; All orders</a>
+   &middot; <a th:href="@{|/saga/${order.orderId}|}">View saga trace</a></p>
 
 <h1>Order <span th:text="${order.orderId}"></span></h1>
 
