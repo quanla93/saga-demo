@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.servlet.view.RedirectView;
 
 import java.util.UUID;
@@ -23,8 +24,11 @@ public class DashboardController {
     private final ProductGateway products;
 
     @GetMapping("/")
-    public String index(Model model) {
-        model.addAttribute("orders", orders.listOrders());
+    public String index(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            Model model) {
+        model.addAttribute("orderPage", orders.listOrders(page, size));
         model.addAttribute("products", products.listProducts());
         model.addAttribute("form", new CreateOrderForm());
         return "index";

@@ -5,9 +5,10 @@
   <title>Order detail</title>
   <script src="https://unpkg.com/htmx.org@2.0.3"></script>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+    body { font-family: system-ui, sans-serif; max-width: 1100px; margin: 1.5rem auto; padding: 0 1rem; color: #1f2937; }
     h1, h2 { color: #1f2937; }
-    .panel { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+    h2 { font-size: 1.05rem; margin-top: 1.5rem; }
+    .panel { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; margin: 0.5rem 0; }
     .step { font-size: 1.1rem; font-weight: 600; color: #2563eb; }
     .step.done { color: #047857; }
     .step.failed { color: #b91c1c; }
@@ -15,20 +16,62 @@
     th, td { border: 1px solid #e5e7eb; padding: 0.4rem 0.6rem; text-align: left; font-size: 0.9rem; }
     th { background: #f3f4f6; }
     a { color: #2563eb; }
+
+    /* Inline saga trace timeline */
+    table.timeline { width: 100%; border-collapse: collapse; font-size: 0.82rem; border: 0; }
+    table.timeline th { background: #f3f4f6; text-align: left; padding: 0.4rem 0.6rem; border: 0; border-bottom: 2px solid #e5e7eb; }
+    table.timeline td { padding: 0.4rem 0.6rem; border: 0; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+    table.timeline tr.cat-SUCCESS      td:first-child { border-left: 3px solid #10b981; }
+    table.timeline tr.cat-FAILURE      td:first-child { border-left: 3px solid #ef4444; }
+    table.timeline tr.cat-COMPENSATING td:first-child { border-left: 3px solid #f97316; }
+    table.timeline tr.cat-COMMAND      td:first-child { border-left: 3px solid #3b82f6; }
+    table.timeline tr.cat-EVENT        td:first-child { border-left: 3px solid #6b7280; }
+    .mono { font-family: ui-monospace, monospace; font-size: 0.78rem; }
+    .payload { color: #4b5563; white-space: pre-wrap; word-break: break-all; max-width: 360px; font-family: ui-monospace, monospace; font-size: 0.72rem; }
+    .empty { padding: 1rem; text-align: center; color: #6b7280; font-style: italic; }
+    .legend { font-size: 0.78rem; margin: 0.4rem 0; color: #6b7280; }
+    .legend span { display: inline-block; margin-right: 0.9rem; padding-left: 8px; border-left: 3px solid; }
+    .legend .l-cmd  { border-color: #3b82f6; }
+    .legend .l-evt  { border-color: #6b7280; }
+    .legend .l-ok   { border-color: #10b981; }
+    .legend .l-fail { border-color: #ef4444; }
+    .legend .l-comp { border-color: #f97316; }
+
+    /* Benchmark recipe block */
+    .recipe { background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 1rem; margin: 0.5rem 0; font-family: ui-monospace, monospace; font-size: 0.8rem; overflow-x: auto; }
+    .recipe .comment { color: #94a3b8; }
+    .recipe .cmd { color: #fbbf24; }
+    .recipe pre { margin: 0; white-space: pre; }
+    .recipe-hint { font-size: 0.85rem; color: #4b5563; margin-bottom: 0.5rem; }
   </style>
 </head>
 <body>
 
 <p><a th:href="@{/}">&larr; All orders</a>
-   &middot; <a th:href="@{|/saga/${order.orderId}|}">View saga trace</a></p>
+   &middot; <a th:href="@{|/saga/${order.orderId}|}">Full-screen saga view</a></p>
 
 <h1>Order <span th:text="${order.orderId}"></span></h1>
 
+<h2>Status</h2>
 <div class="panel"
      th:hx-get="@{|/orders/${order.orderId}/status|}"
      hx-trigger="load, every 1s"
      hx-swap="innerHTML">
   <div th:replace="~{fragments/order-status :: status}"></div>
+</div>
+
+<h2>Saga step log <span style="font-weight:normal;font-size:0.85rem;color:#6b7280;">(auto-refresh)</span></h2>
+<p class="legend">
+  <span class="l-cmd">command (orchestrator -> participant)</span>
+  <span class="l-evt">event (participant -> orchestrator)</span>
+  <span class="l-ok">success</span>
+  <span class="l-fail">failure</span>
+  <span class="l-comp">compensating</span>
+</p>
+<div th:hx-get="@{|/saga/${order.orderId}/timeline|}"
+     hx-trigger="load, every 1s"
+     hx-swap="innerHTML">
+  <div th:replace="~{fragments/saga-trace :: timeline}"></div>
 </div>
 
 <h2>Line items</h2>
@@ -42,6 +85,41 @@
     </tr>
   </tbody>
 </table>
+
+<h2>Benchmark this stack (k6)</h2>
+<p class="recipe-hint">
+  Stack hiện đang chạy với <strong>~2 GB RAM / 2 CPU</strong> cap (xem
+  <code>docker-compose.yml</code>). Các kịch bản dưới đã tune cho hardware đó
+  &mdash; tránh fire 5000 VUs đồng thời, dùng <em>constant-arrival-rate</em>
+  để giữ ổn định. Copy lệnh và chạy trong terminal.
+</p>
+
+<div class="recipe">
+<pre><span class="comment"># 1) Smoke (30s, 5 VUs) — gate trước stress run</span>
+<span class="cmd">k6 run test-data/k6-smoke.js</span>
+
+<span class="comment"># 2) Light load — 1000 orders, ~50 req/s, ~20s</span>
+<span class="cmd">k6 run -e TARGET_ORDERS=1000 -e RATE=50 test-data/k6-benchmark.js</span>
+
+<span class="comment"># 3) Medium — 2500 orders, ~80 req/s, ~30s</span>
+<span class="cmd">k6 run -e TARGET_ORDERS=2500 -e RATE=80 test-data/k6-benchmark.js</span>
+
+<span class="comment"># 4) Heavy for homelab — 5000 orders, ~80 req/s, ~60s</span>
+<span class="cmd">k6 run -e TARGET_ORDERS=5000 -e RATE=80 test-data/k6-benchmark.js</span>
+
+<span class="comment"># 5) So sánh REDIS vs DATABASE engine (chạy 2 lần, đổi mode giữa chừng)</span>
+<span class="cmd">curl -X POST http://localhost:8083/admin/stock-engine/DATABASE</span>
+<span class="cmd">k6 run -e TARGET_ORDERS=1000 -e RATE=50 test-data/k6-benchmark.js</span>
+<span class="cmd">curl -X POST http://localhost:8083/admin/stock-engine/REDIS</span>
+<span class="cmd">k6 run -e TARGET_ORDERS=1000 -e RATE=50 test-data/k6-benchmark.js</span></pre>
+</div>
+
+<p class="recipe-hint" style="margin-top:0.5rem">
+  Sau khi chạy, mở <a th:href="@{/}">/</a> để xem tổng số order, hoặc
+  <a href="http://localhost:9000" target="_blank">Kafdrop :9000</a> để inspect
+  message lưu lượng. Nếu CPU container vượt 80% (xem
+  <code>docker stats</code>) thì giảm <code>RATE</code> xuống.
+</p>
 
 </body>
 </html>

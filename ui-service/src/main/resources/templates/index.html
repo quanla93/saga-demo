@@ -13,6 +13,10 @@
     .status-CONFIRMED { color: #047857; font-weight: 600; }
     .status-CANCELLED { color: #b91c1c; font-weight: 600; }
     .status-PENDING { color: #b45309; font-weight: 600; }
+    .pager { display: flex; gap: 0.5rem; align-items: center; font-size: 0.85rem; margin: 0.5rem 0 1rem; color: #4b5563; }
+    .pager a, .pager span.disabled { padding: 0.25rem 0.6rem; border: 1px solid #d1d5db; border-radius: 4px; text-decoration: none; background: white; }
+    .pager span.disabled { color: #9ca3af; background: #f9fafb; }
+    .pager select { padding: 0.2rem 0.4rem; border: 1px solid #d1d5db; border-radius: 4px; }
     form { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1rem; max-width: 600px; background: #f9fafb; padding: 1rem; border-radius: 8px; }
     form label { font-size: 0.85rem; color: #374151; }
     form input, form select { padding: 0.4rem; border: 1px solid #d1d5db; border-radius: 4px; font-family: inherit; }
@@ -59,16 +63,38 @@
   </tbody>
 </table>
 
-<h2>Orders</h2>
+<h2>Orders <span style="font-weight:normal;font-size:0.85rem;color:#6b7280;"
+  th:text="|(showing ${orderPage.content.size()} of ${orderPage.totalElements}, page ${orderPage.displayPage()} / ${orderPage.totalPages == 0 ? 1 : orderPage.totalPages})|"></span></h2>
+
+<div class="pager">
+  <a th:if="${orderPage.hasPrev()}"
+     th:href="@{/(page=${orderPage.prevPage()}, size=${orderPage.size})}">&laquo; Prev</a>
+  <span th:unless="${orderPage.hasPrev()}" class="disabled">&laquo; Prev</span>
+
+  <a th:if="${orderPage.hasNext()}"
+     th:href="@{/(page=${orderPage.nextPage()}, size=${orderPage.size})}">Next &raquo;</a>
+  <span th:unless="${orderPage.hasNext()}" class="disabled">Next &raquo;</span>
+
+  <span>Page size:</span>
+  <select onchange="location.href='/?page=0&amp;size='+this.value">
+    <option th:each="s : ${ {10, 20, 50, 100} }"
+            th:value="${s}" th:text="${s}"
+            th:selected="${s == orderPage.size}"></option>
+  </select>
+</div>
+
 <table>
   <thead><tr><th>Order</th><th>Status</th><th>Saga state</th><th>Total</th><th>Created</th></tr></thead>
   <tbody>
-    <tr th:each="o : ${orders}">
+    <tr th:each="o : ${orderPage.content}">
       <td><a th:href="@{|/orders/${o.orderId}|}" th:text="${#strings.substring(o.orderId, 0, 8)}"></a></td>
       <td th:text="${o.status}" th:classappend="|status-${o.status}|"></td>
       <td th:text="${o.sagaState}"></td>
       <td th:text="${o.totalAmount}"></td>
       <td th:text="${o.createdAt}"></td>
+    </tr>
+    <tr th:if="${orderPage.content.isEmpty()}">
+      <td colspan="5" style="text-align:center;color:#6b7280;">No orders yet — place one above.</td>
     </tr>
   </tbody>
 </table>

@@ -9,12 +9,14 @@ import com.quanla.sagademo.order.domain.SagaInstanceRepository;
 import com.quanla.sagademo.order.saga.OrderService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -43,13 +45,21 @@ public class OrderController {
         return OrderResponse.from(order, saga);
     }
 
+    /**
+     * Paginated list, newest first. Page is 0-based. Default page size 20,
+     * capped at 100 to bound the worst-case response size.
+     */
     @GetMapping
-    public List<OrderResponse> listOrders() {
-        return orderRepository.findAll().stream()
+    public Page<OrderResponse> listOrders(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        int safeSize = Math.max(1, Math.min(size, 100));
+        PageRequest req = PageRequest.of(Math.max(0, page), safeSize,
+                Sort.by("createdAt").descending());
+        return orderRepository.findAll(req)
                 .map(order -> {
                     SagaInstance saga = sagaRepository.findByOrderId(order.getId()).orElse(null);
                     return OrderResponse.from(order, saga);
-                })
-                .toList();
+                });
     }
 }

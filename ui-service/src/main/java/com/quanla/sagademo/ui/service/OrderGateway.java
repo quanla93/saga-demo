@@ -1,8 +1,8 @@
 package com.quanla.sagademo.ui.service;
 
+import com.quanla.sagademo.ui.dto.OrderPage;
 import com.quanla.sagademo.ui.dto.OrderView;
 import lombok.RequiredArgsConstructor;
-import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -21,11 +21,14 @@ public class OrderGateway {
 
     private final RestClient orderRestClient;
 
-    public List<OrderView> listOrders() {
+    public OrderPage listOrders(int page, int size) {
         return orderRestClient.get()
-                .uri("/api/orders")
+                .uri(uri -> uri.path("/api/orders")
+                        .queryParam("page", page)
+                        .queryParam("size", size)
+                        .build())
                 .retrieve()
-                .body(new ParameterizedTypeReference<>() {});
+                .body(OrderPage.class);
     }
 
     public OrderView getOrder(UUID id) {
