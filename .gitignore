@@ -42,3 +42,8 @@ Thumbs.db
 
 ### Docker volumes ###
 docker/postgres/data/
+
+### Local environment (real values — only .env.example is tracked) ###
+.env
+.env.local
+docker-compose.override.yml
