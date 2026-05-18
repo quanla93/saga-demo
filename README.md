@@ -212,6 +212,102 @@ inventory-service.
 
 ---
 
+## Hot-path stock: Redis engine + runtime router
+
+### Why Redis at all
+
+A pessimistic-lock `SELECT ... FOR UPDATE` on a row in `products` is correct
+but serializes every reservation that touches the same SKU. For ~100 req/s
+that's fine — for flash-sale traffic (10k+ req/s on a single hot SKU) the
+lock queue explodes, deadlock-detector fires constantly, and DB CPU pegs.
+
+Big e-commerce platforms (Shopee, Lazada, Tokopedia, Amazon) keep "available
+stock" in an in-memory store **24/7**, not just during sale windows. Postgres
+remains the authoritative log for orders + audit + product catalog; Redis is
+the source of truth for the "is there enough stock right now" question the
+order flow asks thousands of times per second.
+
+### Two engines, one interface
+
+This demo ships **both implementations behind the same
+`StockReservationEngine` interface** so you can compare them side by side:
+
+| Engine | Source of truth for available stock | Concurrency primitive | Throughput on hot SKU |
+| --- | --- | --- | --- |
+| `DatabaseStockEngine` | Postgres `products.stock_available` | Row-level pessimistic lock, ordered by id to avoid deadlocks | Tens of req/s per SKU |
+| `RedisStockEngine` | Redis `stock:{productId}` integer keys | Atomic Lua script (single-threaded server-side) | Thousands of req/s per SKU |
+
+The Redis engine's Lua script does check + decrement + idempotency-set update
+in **one round-trip, atomically**. It also keys an idempotency `SET` by
+`orderId`, so a retried `ReserveInventory` command from Kafka decrements stock
+only once even if the listener handler re-runs.
+
+### Runtime engine switching (no restart)
+
+Spring wires both engines as beans plus a `StockEngineRouter` (marked
+`@Primary`) that holds a volatile mode and delegates each call to one of the
+two. Mode can change through any of three paths:
+
+| Trigger | Use case |
+| --- | --- |
+| Boot config `saga.inventory.stock-source` (`DATABASE` / `REDIS` / `AUTO`) | Default behaviour |
+| Admin REST: `POST /admin/stock-engine/{DATABASE\|REDIS}` | Operator override — instant rollback if Redis misbehaves |
+| `AUTO` + `SaleWindowSwitcher` (scheduled every 30s) | Reads configured sale windows (e.g. `10:00-10:30,15:00-16:00`) and flips DB <-> Redis automatically; pre-warms Redis on entry and reconciles Redis -> Postgres on exit |
+
+Inspect / change at runtime:
+
+```bash
+curl http://localhost:8083/admin/stock-engine                    # {"effectiveMode":"REDIS"}
+curl -X POST http://localhost:8083/admin/stock-engine/DATABASE   # reconciles Redis->DB, then flips
+curl -X POST http://localhost:8083/admin/stock-engine/REDIS      # warms Redis from DB, then flips
+```
+
+### When would you actually pick AUTO over always-on Redis?
+
+In production e-commerce: **almost never** — Redis-always-on with Redis
+Cluster + Debezium CDC is the standard pattern. AUTO mode fits internal /
+B2B systems that sit at near-zero load most of the time and occasionally
+spike during scheduled batch jobs, where the operational cost of running
+Redis 24/7 outweighs the latency win.
+
+The router is in the demo to make the trade-off explicit and to give you an
+interview talking point about reconciliation strategy. If you were forking
+this for production you'd most likely delete `SaleWindowSwitcher` and pin the
+mode to `REDIS`.
+
+See: `stock/StockReservationEngine.java`, `stock/RedisStockEngine.java`,
+`stock/DatabaseStockEngine.java`, `stock/StockEngineRouter.java`,
+`stock/SaleWindowSwitcher.java`, `config/RedisConfig.java`.
+
+---
+
+## Stuck-saga detector
+
+Retry + DLT handles transient failures but leaves a class of sagas that no
+amount of Kafka redelivery will rescue: a participant crashed, the saga's
+trigger event landed in the DLT and was never replayed, or an operator
+intervened mid-flow. Those sagas sit in a non-terminal state with no further
+input — order stuck on the dashboard at "Charging payment..." indefinitely.
+
+`SagaTimeoutScanner` runs in order-service every `saga.timeout-scan-seconds`
+(default 30s) and forces any non-terminal saga older than `saga.timeout-seconds`
+(default 120s) to a safe terminal state:
+
+| Stuck state | Recovery action |
+| --- | --- |
+| `STARTED` | Nothing reserved upstream -> mark order CANCELLED + saga FAILED |
+| `INVENTORY_RESERVED` | Stock was decremented -> emit `ReleaseInventory` (compensating), transition to `COMPENSATING_RELEASE_INVENTORY` and let the normal flow finish it |
+| `COMPENSATING_*` | Compensation itself stalled -> mark FAILED + log loudly for operator review |
+
+Why this is needed even with retry+DLT: retry only covers the case where the
+listener throws. If a message simply never arrives (lost, never produced,
+crashed before publish), the listener has nothing to retry. The timeout
+scanner is the saga-level safety net.
+
+See: `saga/SagaTimeoutScanner.java`.
+
+---
+
 ## State machine (orchestrator)
 
 ```mermaid
@@ -329,13 +425,13 @@ saga-demo/
 
 ## What the demo does NOT cover (intentional scope)
 
-- No Saga timeout / stuck-saga detector — production systems run a scheduled job
-  to surface sagas that stayed in a non-terminal state past their SLA.
 - No DLT replay tool. DLT records carry enough headers to manually re-publish
   to the original topic via Kafdrop / kcat, but a real deployment ships a small
   replay endpoint with a "fix-and-retry" workflow.
-- No CDC-based outbox publishing (Debezium). The polling approach was chosen
-  for clarity; CDC is the production-grade alternative.
+- No Redis Cluster / Sentinel — single Redis container. Production would shard
+  Redis by SKU hash and run with AOF + replication for durability.
+- No Debezium / CDC outbox publishing. Polling is used for clarity; CDC is the
+  production-grade alternative when outbox traffic gets heavy.
 - No authentication / multi-tenancy.
 - Single Postgres instance with three schemas (not three separate clusters).
   This still gives each service its own DDL/data, but in production each service

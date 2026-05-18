@@ -4,6 +4,10 @@ server:
 spring:
   application:
     name: inventory-service
+  data:
+    redis:
+      host: localhost
+      port: 6379
   datasource:
     url: jdbc:postgresql://localhost:5432/saga?currentSchema=inventory_db
     username: saga
@@ -33,6 +37,11 @@ spring:
 saga:
   outbox:
     poll-interval-ms: 500
+  inventory:
+    # REDIS: atomic Lua decrement on hot path (flash sale). Postgres products row
+    #        is the long-term truth, Redis is the in-window truth.
+    # DATABASE: pessimistic-lock select FOR UPDATE on products. Safe for low-volume.
+    stock-source: REDIS
 
 logging:
   level:

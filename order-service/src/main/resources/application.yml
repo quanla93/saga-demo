@@ -36,6 +36,11 @@ saga:
   outbox:
     poll-interval-ms: 500
     batch-size: 50
+  # Stuck-saga detector: any non-terminal saga whose updated_at is older than
+  # timeout-seconds will be forced forward (FAILED or COMPENSATING) by
+  # SagaTimeoutScanner on its next scan tick.
+  timeout-seconds: 120
+  timeout-scan-seconds: 30
 
 logging:
   level:

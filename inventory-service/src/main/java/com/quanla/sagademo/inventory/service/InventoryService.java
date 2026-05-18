@@ -5,40 +5,53 @@ import com.quanla.sagademo.common.event.EventTypes;
 import com.quanla.sagademo.common.event.payload.*;
 import com.quanla.sagademo.inventory.domain.*;
 import com.quanla.sagademo.inventory.outbox.OutboxRecorder;
+import com.quanla.sagademo.inventory.stock.ReservationOutcome;
+import com.quanla.sagademo.inventory.stock.StockReservationEngine;
+import com.quanla.sagademo.inventory.stock.StockReservationEngine.ReservationLine;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Reserves and releases stock for the saga.
  * <p>
- * Reservation is the all-or-nothing step that may force the saga to compensate
- * payment. Release is the compensating action triggered when downstream
- * (payment) fails after we've already moved stock from available → reserved.
+ * The "check + decrement available stock" step is delegated to a
+ * {@link StockReservationEngine} (routed at runtime between Database and Redis
+ * implementations). Persistence of the {@link Reservation} entity and emission
+ * of saga events stays here.
  * <p>
- * Concurrency: we take a pessimistic write lock on every Product touched by the
- * order, sorted by id, so two concurrent reservations cannot double-spend the
- * same SKU and the lock order is consistent (no deadlock).
+ * Two layers of idempotency:
+ * <ul>
+ *   <li>{@link Reservation#getOrderId()} is UNIQUE — a retried command finds
+ *       the existing reservation, re-emits the same outcome event, and skips
+ *       the engine call entirely.
+ *   <li>If a retry slips past the above (e.g. the first attempt's TX rolled
+ *       back before inserting Reservation but AFTER Redis already decremented),
+ *       the engine itself dedups by orderId — the Redis Lua script's
+ *       {@code reserved-orders} SET ensures we never double-decrement.
+ * </ul>
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class InventoryService {
 
-    private final ProductRepository productRepository;
     private final ReservationRepository reservationRepository;
+    private final StockReservationEngine engine;
     private final OutboxRecorder outbox;
 
     @Transactional
     public void reserve(UUID sagaId, ReserveInventoryCommand command) {
         Optional<Reservation> existing = reservationRepository.findByOrderId(command.orderId());
         if (existing.isPresent()) {
-            log.info("Reservation for order {} already exists — re-emitting outcome", command.orderId());
             Reservation r = existing.get();
+            log.info("Reservation for order {} already exists (status={}) — re-emitting outcome",
+                    command.orderId(), r.getStatus());
             if (r.getStatus() == ReservationStatus.RESERVED) {
                 outbox.record(sagaId, "Reservation", r.getId(),
                         Topics.INVENTORY_EVENTS, command.orderId().toString(),
@@ -48,28 +61,11 @@ public class InventoryService {
             return;
         }
 
-        List<UUID> productIds = command.items().stream()
-                .map(OrderItemDto::productId)
-                .distinct()
-                .sorted()
-                .toList();
-        Map<UUID, Product> productsById = productRepository
-                .lockAllByIdOrderedById(productIds).stream()
-                .collect(Collectors.toMap(Product::getId, p -> p));
+        ReservationOutcome outcome = engine.tryReserve(command.orderId(), command.items());
 
-        for (OrderItemDto item : command.items()) {
-            Product product = productsById.get(item.productId());
-            if (product == null) {
-                emitFailure(sagaId, command.orderId(), "Unknown product " + item.productId());
-                return;
-            }
-            if (product.getStockAvailable() < item.quantity()) {
-                emitFailure(sagaId, command.orderId(),
-                        "Insufficient stock for SKU " + product.getSku()
-                                + " (have " + product.getStockAvailable()
-                                + ", need " + item.quantity() + ")");
-                return;
-            }
+        if (!outcome.isSuccess()) {
+            emitFailure(sagaId, command.orderId(), outcome.reason());
+            return;
         }
 
         Reservation reservation = Reservation.builder()
@@ -77,12 +73,7 @@ public class InventoryService {
                 .orderId(command.orderId())
                 .status(ReservationStatus.RESERVED)
                 .build();
-
         for (OrderItemDto item : command.items()) {
-            Product product = productsById.get(item.productId());
-            product.setStockAvailable(product.getStockAvailable() - item.quantity());
-            product.setStockReserved(product.getStockReserved() + item.quantity());
-
             reservation.getItems().add(ReservationItem.builder()
                     .id(UUID.randomUUID())
                     .reservation(reservation)
@@ -90,14 +81,14 @@ public class InventoryService {
                     .quantity(item.quantity())
                     .build());
         }
-
         reservationRepository.save(reservation);
 
         outbox.record(sagaId, "Reservation", reservation.getId(),
                 Topics.INVENTORY_EVENTS, command.orderId().toString(),
                 EventTypes.INVENTORY_RESERVED,
                 new InventoryReservedEvent(command.orderId(), reservation.getId()));
-        log.info("Reserved inventory for order {} (reservation {})", command.orderId(), reservation.getId());
+        log.info("Reserved inventory for order {} (reservation {})",
+                command.orderId(), reservation.getId());
     }
 
     @Transactional
@@ -108,20 +99,10 @@ public class InventoryService {
         if (reservation.getStatus() == ReservationStatus.RELEASED) {
             log.info("Reservation {} already released — re-emitting event", reservation.getId());
         } else {
-            List<UUID> productIds = reservation.getItems().stream()
-                    .map(ReservationItem::getProductId)
-                    .distinct()
-                    .sorted()
+            List<ReservationLine> lines = reservation.getItems().stream()
+                    .map(i -> new ReservationLine(i.getProductId(), i.getQuantity()))
                     .toList();
-            Map<UUID, Product> productsById = productRepository
-                    .lockAllByIdOrderedById(productIds).stream()
-                    .collect(Collectors.toMap(Product::getId, p -> p));
-
-            for (ReservationItem item : reservation.getItems()) {
-                Product product = productsById.get(item.getProductId());
-                product.setStockReserved(product.getStockReserved() - item.getQuantity());
-                product.setStockAvailable(product.getStockAvailable() + item.getQuantity());
-            }
+            engine.release(reservation.getOrderId(), lines);
             reservation.setStatus(ReservationStatus.RELEASED);
             reservationRepository.save(reservation);
         }
@@ -129,7 +110,8 @@ public class InventoryService {
                 Topics.INVENTORY_EVENTS, command.orderId().toString(),
                 EventTypes.INVENTORY_RELEASED,
                 new InventoryReleasedEvent(command.orderId(), reservation.getId()));
-        log.info("Released inventory for order {} (reservation {})", command.orderId(), reservation.getId());
+        log.info("Released inventory for order {} (reservation {})",
+                command.orderId(), reservation.getId());
     }
 
     private void emitFailure(UUID sagaId, UUID orderId, String reason) {
