@@ -52,37 +52,56 @@ decoupled from the saga participants.
 
 ### Happy path
 
-```
-client          order-service           inventory-service       payment-service
-  |  POST /api/orders   |                       |                       |
-  |-------------------->| INSERT order + saga + |                       |
-  |                     | outbox(ReserveInventory)                      |
-  |   201 Created       |                       |                       |
-  |<--------------------| OutboxPublisher --> inventory.commands -----> |
-  |                     |                       | reserve stock         |
-  |                     |                       | outbox(InventoryReserved)
-  |                     |                       | --> inventory.events  |
-  |                     | <--- consume          |                       |
-  |                     | saga: INVENTORY_RESERVED                      |
-  |                     | outbox(ChargePayment) |                       |
-  |                     | --> payment.commands ----------------------> |
-  |                     |                       |                       | charge
-  |                     |                       |                       | outbox(PaymentCompleted)
-  |                     |                       |                       | --> payment.events
-  |                     | <--- consume                                  |
-  |                     | saga: COMPLETED, order: CONFIRMED             |
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Client
+    participant Order as order-service<br/>(orchestrator)
+    participant Kafka
+    participant Inv as inventory-service
+    participant Pay as payment-service
+
+    Client->>Order: POST /api/orders<br/>(Idempotency-Key)
+    Note over Order: TX: INSERT order + saga(STARTED)<br/>+ outbox(ReserveInventory)
+    Order-->>Client: 201 Created (saga=STARTED)
+
+    Order->>Kafka: ReserveInventory<br/>(via OutboxPublisher)
+    Kafka->>Inv: deliver
+    Note over Inv: TX: lock products + decr stock<br/>+ insert reservation<br/>+ outbox(InventoryReserved)<br/>+ inbox(messageId)
+    Inv->>Kafka: InventoryReserved
+    Kafka->>Order: deliver
+
+    Note over Order: TX: saga → INVENTORY_RESERVED<br/>+ outbox(ChargePayment)<br/>+ inbox(messageId)
+    Order->>Kafka: ChargePayment
+    Kafka->>Pay: deliver
+
+    Note over Pay: TX: insert payment(COMPLETED)<br/>+ outbox(PaymentCompleted)<br/>+ inbox(messageId)
+    Pay->>Kafka: PaymentCompleted
+    Kafka->>Order: deliver
+
+    Note over Order: TX: saga → COMPLETED<br/>order → CONFIRMED<br/>+ inbox(messageId)
 ```
 
 ### Compensating path (payment fails)
 
-```
-... inventory reserved as above ...
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Order as order-service
+    participant Kafka
+    participant Inv as inventory-service
+    participant Pay as payment-service
 
-payment-service: amount > fail-above-amount → emits PaymentFailed
-order-service:   saga -> COMPENSATING_RELEASE_INVENTORY
-                 outbox(ReleaseInventory) -> inventory.commands
-inventory-service: releases stock, emits InventoryReleased
-order-service:   saga -> FAILED, order -> CANCELLED (with reason)
+    Note over Pay: amount > fail-above-amount
+    Pay->>Kafka: PaymentFailed
+    Kafka->>Order: deliver
+    Note over Order: TX: saga → COMPENSATING_RELEASE_INVENTORY<br/>+ outbox(ReleaseInventory)
+    Order->>Kafka: ReleaseInventory
+    Kafka->>Inv: deliver
+    Note over Inv: TX: lock products + restore stock<br/>+ reservation → RELEASED<br/>+ outbox(InventoryReleased)
+    Inv->>Kafka: InventoryReleased
+    Kafka->>Order: deliver
+    Note over Order: TX: saga → FAILED<br/>order → CANCELLED (with reason)
 ```
 
 ---
@@ -153,30 +172,58 @@ side effects.
 
 See: `OrderService.createOrder` in `order-service`.
 
+### 4. Consumer retry + Dead-Letter Topics
+
+**Problem.** Transient failures happen all the time: the DB is briefly
+unavailable, a downstream is slow, a Kafka rebalance hits mid-handler. Without
+a retry policy, the listener re-throws and Kafka redelivers forever — pinning
+the partition and blocking every subsequent message.
+
+**Solution.** Each service registers a `DefaultErrorHandler` wired to a
+`DeadLetterPublishingRecoverer`:
+
+- **5 total attempts** per record (1 original + 4 retries) with a **1-second
+  back-off** between attempts
+- On the 5th failure, the record is published to `<topic>.DLT` (Spring's
+  default Dead Letter Topic naming) and the offset is committed so the
+  partition moves on
+- `IllegalArgumentException`, `IllegalStateException`, and `JsonProcessingException`
+  are **not retried** — they're programming or data errors that won't fix
+  themselves, so we fail fast straight to DLT
+
+**Interaction with the Inbox.** Because the inbox-row insert and the business
+effect commit together inside the listener's `@Transactional` boundary, a
+failed attempt rolls back BOTH — leaving the inbox empty for that messageId.
+The next retry therefore proceeds as a genuine first attempt, not a duplicate.
+
+**DLT topics created automatically** (Kafka auto-create is on):
+- `inventory.commands.DLT`, `inventory.events.DLT`
+- `payment.commands.DLT`, `payment.events.DLT`
+
+**Operating the DLT.** Inspect failed records in Kafdrop
+(<http://localhost:9000>) — Spring adds headers like
+`kafka_dlt-exception-fqcn`, `kafka_dlt-exception-message`, and
+`kafka_dlt-original-offset` to every DLT record so you can triage without
+reaching for logs. A real deployment pairs this with an alert ("DLT > 0
+records in last 5 min") and a small replay tool.
+
+See: `KafkaErrorHandlerConfig.java` in each of order-service / payment-service /
+inventory-service.
+
 ---
 
 ## State machine (orchestrator)
 
-```
-                +---------+
-                | STARTED |
-                +----+----+
-                     |
-       InventoryReservationFailed -----> FAILED
-                     |
-              InventoryReserved
-                     |
-                     v
-         +-----------+-----------+
-         |  INVENTORY_RESERVED   |
-         +-----------+-----------+
-                     |
-        PaymentFailed -----> COMPENSATING_RELEASE_INVENTORY
-                     |              |
-              PaymentCompleted      InventoryReleased
-                     |              |
-                     v              v
-                 COMPLETED       FAILED
+```mermaid
+stateDiagram-v2
+    [*] --> STARTED: POST /api/orders
+    STARTED --> INVENTORY_RESERVED: InventoryReserved
+    STARTED --> FAILED: InventoryReservationFailed
+    INVENTORY_RESERVED --> COMPLETED: PaymentCompleted
+    INVENTORY_RESERVED --> COMPENSATING_RELEASE_INVENTORY: PaymentFailed
+    COMPENSATING_RELEASE_INVENTORY --> FAILED: InventoryReleased
+    COMPLETED --> [*]
+    FAILED --> [*]
 ```
 
 Defined in `SagaState.java` and enforced by `SagaOrchestrator.java`.
@@ -282,10 +329,11 @@ saga-demo/
 
 ## What the demo does NOT cover (intentional scope)
 
-- No retry/backoff config on Kafka consumers — Spring's defaults are used. Real
-  systems pair this with a DLQ and a Dead Letter Publisher.
 - No Saga timeout / stuck-saga detector — production systems run a scheduled job
   to surface sagas that stayed in a non-terminal state past their SLA.
+- No DLT replay tool. DLT records carry enough headers to manually re-publish
+  to the original topic via Kafdrop / kcat, but a real deployment ships a small
+  replay endpoint with a "fix-and-retry" workflow.
 - No CDC-based outbox publishing (Debezium). The polling approach was chosen
   for clarity; CDC is the production-grade alternative.
 - No authentication / multi-tenancy.
