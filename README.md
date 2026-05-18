@@ -394,6 +394,23 @@ curl http://localhost:8083/api/products | jq
 
 OpenAPI / Swagger UI for order-service: <http://localhost:8081/swagger-ui.html>
 
+### Test data + scenario scripts
+
+The [`test-data/`](test-data/) folder ships three ready-to-run artifacts:
+
+- **`requests.http`** — full scenario list as separate REST Client requests
+  (happy path, idempotency replay, compensating, oversell, engine flip). Open
+  in IntelliJ / VS Code and click each one.
+- **`run-scenarios.ps1`** — end-to-end smoke test with assertions. Prints
+  PASS/FAIL per scenario; exits non-zero on first failure so it works as a CI
+  gate.
+- **`load-test.ps1`** — fires N concurrent buyers at one SKU. Run once in
+  REDIS mode and once in DATABASE mode to *see* the contention difference;
+  the script also verifies stock conservation (no oversell, no leaked stock).
+
+See [`test-data/README.md`](test-data/README.md) for the seed catalogue and
+quick recipes.
+
 ---
 
 ## Code map
