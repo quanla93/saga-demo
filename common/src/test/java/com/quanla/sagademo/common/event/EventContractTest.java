@@ -79,6 +79,20 @@ class EventContractTest {
         assertThat(errors).isEmpty();
     }
 
+    @Test
+    void removingRequiredFieldsBreaksVersionOneCompatibility() throws Exception {
+        JsonNode payload = OBJECT_MAPPER.readTree("""
+                {
+                  "orderId": "00000000-0000-0000-0000-000000000001",
+                  "amount": 39.98
+                }
+                """);
+
+        Set<ValidationMessage> errors = loadSchema("payment-completed-event.v1.schema.json").validate(payload);
+
+        assertThat(errors).isNotEmpty();
+    }
+
     private void assertMatchesSchema(String schemaFileName, Object payload) {
         JsonNode payloadJson = OBJECT_MAPPER.valueToTree(payload);
         Set<ValidationMessage> errors = loadSchema(schemaFileName).validate(payloadJson);

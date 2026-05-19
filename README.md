@@ -210,6 +210,23 @@ records in last 5 min") and a small replay tool.
 See: `KafkaErrorHandlerConfig.java` in each of order-service / payment-service /
 inventory-service.
 
+### 5. Event schema/versioning
+
+Every Kafka record is wrapped in `EventEnvelope`, which carries `messageId`,
+`sagaId`, `type`, `schemaVersion`, `occurredAt`, and the JSON `payload`. The
+`schemaVersion` identifies the payload contract version used by consumers for
+compatibility decisions.
+
+Versioned JSON Schemas live under `common/src/main/resources/schemas/events/`
+using the `*.v1.schema.json` naming convention. Contract tests serialize the
+shared Java DTOs and validate them against those schemas, so the demo keeps the
+simple shared DTO module while making the wire contract explicit.
+
+Evolution rule: additive fields are compatible; removing or renaming required
+fields is breaking and should be introduced as a new schema version. Avro,
+Protobuf, or Schema Registry would be a later production hardening step, not a
+first-pass requirement for this repo.
+
 ---
 
 ## Hot-path stock: Redis engine + runtime router
