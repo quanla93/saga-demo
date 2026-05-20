@@ -45,6 +45,8 @@ management:
 saga:
   outbox:
     poll-interval-ms: 500
+    send-timeout-ms: 5000
+    max-attempts: 10
   # Demo behaviour: reject charges where amount exceeds this limit so we can
   # exercise the compensating path. Set very high to always succeed.
   payment:

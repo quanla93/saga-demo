@@ -9,6 +9,6 @@ import java.util.UUID;
 
 public interface OutboxEventRepository extends JpaRepository<OutboxEvent, UUID> {
 
-    @Query("SELECT o FROM OutboxEvent o WHERE o.publishedAt IS NULL ORDER BY o.occurredAt ASC")
+    @Query("SELECT o FROM OutboxEvent o WHERE o.publishedAt IS NULL AND o.parkedAt IS NULL ORDER BY o.occurredAt ASC")
     List<OutboxEvent> findUnpublished(Pageable pageable);
 }

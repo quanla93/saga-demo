@@ -48,6 +48,11 @@ saga:
   outbox:
     poll-interval-ms: 500
     batch-size: 50
+    # Bound the synchronous Kafka send so a hung broker never blocks the publisher thread.
+    send-timeout-ms: 5000
+    # After this many consecutive failures the row is moved to the parking lot
+    # (parked_at set, polling index skips it) and an ERROR log fires for operator alerting.
+    max-attempts: 10
   # Stuck-saga detector: any non-terminal saga whose updated_at is older than
   # timeout-seconds will be forced forward (FAILED or COMPENSATING) by
   # SagaTimeoutScanner on its next scan tick.

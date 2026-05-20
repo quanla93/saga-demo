@@ -44,4 +44,13 @@ public class OutboxEvent {
 
     @Column(name = "published_at")
     private Instant publishedAt;
+
+    @Column(nullable = false)
+    private int attempts;
+
+    @Column(name = "last_error", columnDefinition = "text")
+    private String lastError;
+
+    @Column(name = "parked_at")
+    private Instant parkedAt;
 }

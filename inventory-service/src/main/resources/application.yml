@@ -49,6 +49,8 @@ management:
 saga:
   outbox:
     poll-interval-ms: 500
+    send-timeout-ms: 5000
+    max-attempts: 10
   inventory:
     # REDIS: atomic Lua decrement on hot path (flash sale). Postgres products row
     #        is the long-term truth, Redis is the in-window truth.
